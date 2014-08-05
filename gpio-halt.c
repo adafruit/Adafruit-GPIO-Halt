@@ -246,7 +246,10 @@ int main(int argc, char *argv[]) {
 			timeout = debounceTime; // Set timeout for debounce
 			// Else timeout occurred
 		} else if(timeout == debounceTime) { // Button debounce timeout
-			if(pressed) (void)system("shutdown -h now");
+			if(pressed) {
+				(void)system("shutdown -h now");
+				running = 0;
+			}
 		}
 	}
 
