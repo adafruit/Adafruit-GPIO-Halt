@@ -55,10 +55,12 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <bcm_host.h>
 
 // A few globals ---------------------------------------------------------
 
@@ -112,31 +114,24 @@ void signalHandler(int n) {
 	running = 0;
 }
 
-// Detect Pi board type.  Doesn't return super-granular details,
-// just the most basic distinction needed for GPIO compatibility:
-// 0: Pi 1 Model B revision 1
-// 1: Pi 1 Model B revision 2, Model A, Model B+, Model A+
-// 2: Pi 2 Model B
-
-static int boardType(void) {
+// Detect Pi board type.  Not detailed, just enough for GPIO compatibilty:
+// true  = Pi 1 Model B revision 1 (some GPIO pin numbers were different)
+// false = All other board types
+static bool earlyPiDetect(void) {
 	FILE *fp;
 	char  buf[1024], *ptr;
-	int   n, board = 1; // Assume Pi1 Rev2 by default
+	int   n;
+	bool  isEarly = false; // Assume "modern" Pi by default
 
 	// Relies on info in /proc/cmdline.  If this becomes unreliable
 	// in the future, alt code below uses /proc/cpuinfo if any better.
 #if 1
 	if((fp = fopen("/proc/cmdline", "r"))) {
 		while(fgets(buf, sizeof(buf), fp)) {
-			if((ptr = strstr(buf, "mem_size=")) &&
-			   (sscanf(&ptr[9], "%x", &n) == 1) &&
-			   ((n == 0x3F000000) || (n == 0x40000000))) {
-				board = 2; // Appears to be a Pi 2
-				break;
-			} else if((ptr = strstr(buf, "boardrev=")) &&
+			if((ptr = strstr(buf, "boardrev=")) &&
 			          (sscanf(&ptr[9], "%x", &n) == 1) &&
 			          ((n == 0x02) || (n == 0x03))) {
-				board = 0; // Appears to be an early Pi
+				isEarly = true; // Appears to be an early Pi
 				break;
 			}
 		}
@@ -146,15 +141,10 @@ static int boardType(void) {
 	char s[8];
 	if((fp = fopen("/proc/cpuinfo", "r"))) {
 		while(fgets(buf, sizeof(buf), fp)) {
-			if((ptr = strstr(buf, "Hardware")) &&
-			   (sscanf(&ptr[8], " : %7s", s) == 1) &&
-			   (!strcmp(s, "BCM2709"))) {
-				board = 2; // Appears to be a Pi 2
-				break;
-			} else if((ptr = strstr(buf, "Revision")) &&
+			if((ptr = strstr(buf, "Revision")) &&
 			          (sscanf(&ptr[8], " : %x", &n) == 1) &&
 			          ((n == 0x02) || (n == 0x03))) {
-				board = 0; // Appears to be an early Pi
+				isEarly = true; // Appears to be an early Pi
 				break;
 			}
 		}
@@ -162,25 +152,20 @@ static int boardType(void) {
 	}
 #endif
 
-	return board;
+	return isEarly;
 }
-
 
 // Main stuff ------------------------------------------------------------
 
-#define PI1_BCM2708_PERI_BASE 0x20000000
-#define PI1_GPIO_BASE         (PI1_BCM2708_PERI_BASE + 0x200000)
-#define PI2_BCM2708_PERI_BASE 0x3F000000
-#define PI2_GPIO_BASE         (PI2_BCM2708_PERI_BASE + 0x200000)
-#define BLOCK_SIZE            (4*1024)
-#define GPPUD                 (0x94 / 4)
-#define GPPUDCLK0             (0x98 / 4)
+#define GPIO_BASE  0x200000
+#define BLOCK_SIZE (4*1024)
+#define GPPUD      (0x94 / 4)
+#define GPPUDCLK0  (0x98 / 4)
 
 int main(int argc, char *argv[]) {
 
 	char                   buf[50],      // For sundry filenames
-	                       c,            // Pin input value ('0'/'1')
-	                       board;        // 0=Pi1Rev1, 1=Pi1Rev2, 2=Pi2
+	                       c;            // Pin input value ('0'/'1')
 	int                    fd,           // For mmap, sysfs, uinput
 	                       timeout = -1, // poll() timeout
 	                       pressed;      // Last-read pin state
@@ -195,8 +180,7 @@ int main(int argc, char *argv[]) {
 
 	// If this is a "Revision 1" Pi board (no mounting holes),
 	// remap certain pin numbers for compatibility.
-	board = boardType();
-	if(board == 0) {
+	if(earlyPiDetect()) {
 		if(     pin ==  2) pin = 0;
 		else if(pin ==  3) pin = 1;
 		else if(pin == 27) pin = 21;
@@ -218,9 +202,7 @@ int main(int argc, char *argv[]) {
 	  PROT_READ|PROT_WRITE, // Enable read+write
 	  MAP_SHARED,           // Shared with other processes
 	  fd,                   // File to map
-	  (board == 2) ?
-	   PI2_GPIO_BASE :      // -> GPIO registers
-	   PI1_GPIO_BASE);
+          bcm_host_get_peripheral_address() + GPIO_BASE); // -> GPIO registers
 	close(fd);              // Not needed after mmap()
 	if(gpio == MAP_FAILED) err("Can't mmap()");
 	gpio[GPPUD]     = 2;                    // Enable pullup
