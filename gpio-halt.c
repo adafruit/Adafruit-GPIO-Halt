@@ -72,7 +72,7 @@ int
    pin          = 21;                // Shutdown pin # (override w/argv)
 volatile unsigned int
   *gpio;                             // GPIO register table
-const int
+int
    debounceTime = 20;                // 20 ms for button debouncing
 
 
@@ -177,6 +177,9 @@ int main(int argc, char *argv[]) {
 	signal(SIGKILL, signalHandler);
 
 	if(argc > 1) pin = atoi(argv[1]);
+	// Second argument is the time (in milliseconds) that the button
+    	// should be kept pressed for shutdown to start
+    	if(argc > 2) debounceTime = debounceTime + atoi(argv[2]);
 
 	// If this is a "Revision 1" Pi board (no mounting holes),
 	// remap certain pin numbers for compatibility.
