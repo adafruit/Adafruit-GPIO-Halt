@@ -15,7 +15,8 @@ gpio-halt: gpio-halt.c
 	strip $@
 
 install:
-	mv $(EXECS) /usr/local/bin
+	mv $(EXECS) /usr/local/sbin
+	chown root:root /usr/local/sbin/$(EXECS)
 
 clean:
 	rm -f $(EXECS)
